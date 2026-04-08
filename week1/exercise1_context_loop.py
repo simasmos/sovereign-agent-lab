@@ -85,13 +85,13 @@ The Guilford Arms: capacity=200, vegan=no, status=available
 The Hanging Bat: capacity=70, vegan=yes, status=available
 The Haymarket Vaults: capacity=160, vegan=yes, status=available
 The Grain Store: capacity=170, vegan=no, status=available
-
 The Ensign Ewart: capacity=120, vegan=yes, status=available
 """
 
 QUESTION = (
     "Which single venue is available tonight, fits at least 160 guests, "
     "AND has vegan options? Reply with only the venue name, nothing else."
+   # Reply with exactly one venue name, nothing else.
 )
 
 ACCEPTABLE = {"haymarket", "albanach"}
@@ -116,12 +116,10 @@ The Albanach: capacity=180, vegan=yes, status=available
 The Bow Bar: capacity=80, vegan=yes, status=full
 The Guilford Arms: capacity=200, vegan=no, status=available
 The Hanging Bat: capacity=70, vegan=yes, status=available
-The Raging Bull: capacity=200, vegan=yes, status=available
 The New Town Vault: capacity=162, vegan=no, status=available
 The Holyrood Arms: capacity=160, vegan=yes, status=full
 The Haymarket Vaults: capacity=160, vegan=yes, status=available
 The Grain Store: capacity=170, vegan=no, status=available
-The Festival: capacity=180, vegan=yes, status=available
 The Ensign Ewart: capacity=120, vegan=yes, status=available
 """
 
@@ -227,49 +225,76 @@ def print_part_summary(results: dict) -> None:
 
 def main() -> None:
     print("Exercise 1 — Context Engineering Benchmark")
-    print("Three parts. ~2 minutes total.\n")
+    print("Running 100 iterations.\n")
 
-    results_a = run_part("PART A — Baseline Dataset", VENUES_BASELINE, MAIN_MODEL)
-    print_part_summary(results_a)
+    all_iterations_results = []
+    out_path = OUTPUTS_DIR / "ex1_results_loop.json"
+    reference_signature = None
 
-    results_b = run_part("PART B — Near-Miss Distractors Added", VENUES_WITH_DISTRACTORS, MAIN_MODEL)
-    print_part_summary(results_b)
+    for i in range(100):
+        print(f"\n{'=' * 60}")
+        print(f"  ITERATION {i + 1} / 100")
+        print(f"{'=' * 60}\n")
 
-    a_all = all(r["correct"] for r in results_a.values())
-    b_all = all(r["correct"] for r in results_b.values())
-    run_c = a_all and b_all
+        results_a = run_part("PART A — Baseline Dataset", VENUES_BASELINE, MAIN_MODEL)
+        print_part_summary(results_a)
 
-    results_c = {}
-    if run_c:
-        print("\n  → A and B all-correct. Running Part C (8B model) to show the effect.")
-        results_c = run_part(
-            "PART C — Small Model Stress Test (8B)", VENUES_WITH_DISTRACTORS, SMALL_MODEL
-        )
-        print_part_summary(results_c)
-    else:
-        print("\n  → Structural differences already visible. Skipping Part C.")
+        results_b = run_part("PART B — Near-Miss Distractors Added", VENUES_WITH_DISTRACTORS, MAIN_MODEL)
+        print_part_summary(results_b)
 
-    output = {
-        "model_main":  MAIN_MODEL,
-        "model_small": SMALL_MODEL,
-        "part_a":      results_a,
-        "part_b":      results_b,
-        "part_c_was_run": run_c,
-        "part_c":      results_c,
-        "summary": {
-            "part_a_all_correct": a_all,
-            "part_b_all_correct": b_all,
-            "structural_effect_seen_in": (
-                "none_see_part_c" if (a_all and b_all)
-                else "part_a" if not a_all
-                else "part_b"
-            ),
-        },
-    }
+        a_all = all(r["correct"] for r in results_a.values())
+        b_all = all(r["correct"] for r in results_b.values())
+        run_c = a_all and b_all
 
-    out_path = OUTPUTS_DIR / "ex1_results.json"
-    out_path.write_text(json.dumps(output, indent=2))
-    print(f"\n✅  Results saved to {out_path}")
+        results_c = {}
+        if run_c:
+            print("\n  → A and B all-correct. Running Part C (8B model) to show the effect.")
+            results_c = run_part(
+                "PART C — Small Model Stress Test (8B)", VENUES_WITH_DISTRACTORS, SMALL_MODEL
+            )
+            print_part_summary(results_c)
+        else:
+            print("\n  → Structural differences already visible. Skipping Part C.")
+
+        current_signature = {
+            "part_a": {k: v["answer"] for k, v in results_a.items()},
+            "part_b": {k: v["answer"] for k, v in results_b.items()},
+            "part_c": {k: v["answer"] for k, v in results_c.items()} if run_c else None
+        }
+
+        if reference_signature is None:
+            reference_signature = current_signature
+            is_different = False
+        else:
+            is_different = (current_signature != reference_signature)
+
+        if is_different:
+            print(f"\n  🚨 FLAG: Answers differ from Iteration 1! 🚨")
+
+        output = {
+            "iteration": i + 1,
+            "different_from_first": is_different,
+            "model_main":  MAIN_MODEL,
+            "model_small": SMALL_MODEL,
+            "part_a":      results_a,
+            "part_b":      results_b,
+            "part_c_was_run": run_c,
+            "part_c":      results_c,
+            "summary": {
+                "part_a_all_correct": a_all,
+                "part_b_all_correct": b_all,
+                "structural_effect_seen_in": (
+                    "none_see_part_c" if (a_all and b_all)
+                    else "part_a" if not a_all
+                    else "part_b"
+                ),
+            },
+        }
+        all_iterations_results.append(output)
+
+        out_path.write_text(json.dumps(all_iterations_results, indent=2))
+        print(f"\n✅  Results saved to {out_path} for iteration {i + 1}")
+
     print("    Fill in week1/answers/ex1_answers.py")
 
 

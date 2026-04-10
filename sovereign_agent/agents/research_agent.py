@@ -69,7 +69,7 @@ load_dotenv()
 llm = ChatOpenAI(
     base_url="https://api.tokenfactory.nebius.com/v1/",
     api_key=os.getenv("NEBIUS_KEY"),
-    model="meta-llama/Llama-3.3-70B-Instruct",
+    model="moonshotai/Kimi-K2-Thinking",
     temperature=0,
 )
 
@@ -121,18 +121,18 @@ def run_research_agent(task: str, max_turns: int = 8) -> dict:
     for m in result["messages"]:
         role    = getattr(m, "type", "unknown")
         content = m.content
+        print(f"DEBUG: role={role}, content={repr(content)[:120]}, has_tool_calls={bool(getattr(m, 'tool_calls', []))}")
 
-        # Tool-call messages have structured list content
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    entry = {
-                        "tool": block["name"],
-                        "args": block.get("input", {}),
-                    }
-                    tool_calls_made.append(entry)
-                    full_trace.append({"role": "tool_call", **entry})
-            continue
+        # Extract tool calls from AIMessage.tool_calls (OpenAI-compatible format)
+        # LangGraph stores tool calls here, not inside content like Anthropic does
+        if hasattr(m, "tool_calls") and m.tool_calls:
+            for tc in m.tool_calls:
+                entry = {
+                    "tool": tc["name"],
+                    "args": tc.get("args", {}),
+                }
+                tool_calls_made.append(entry)
+                full_trace.append({"role": "tool_call", **entry})
 
         if content:
             full_trace.append({"role": role, "content": str(content)})

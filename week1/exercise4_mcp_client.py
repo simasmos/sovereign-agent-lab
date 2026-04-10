@@ -78,6 +78,9 @@ def _make_mcp_caller(tool_name: str, server_script: str):
     return call
 
 
+from pydantic import create_model
+
+
 async def discover_tools(server_script: str) -> list:
     """
     Connect once, list all tools, and wrap each as a LangChain StructuredTool.
@@ -86,6 +89,9 @@ async def discover_tools(server_script: str) -> list:
     mcp_venue_server.py and this function picks it up automatically.
     No changes needed here.
     """
+    # Map JSON Schema types to Python types for Pydantic model creation
+    _type_map = {"string": str, "integer": int, "number": float, "boolean": bool}
+
     params = StdioServerParameters(command=sys.executable, args=[server_script])
     async with stdio_client(params) as (r, w):
         async with ClientSession(r, w) as session:
@@ -93,10 +99,22 @@ async def discover_tools(server_script: str) -> list:
             raw   = await session.list_tools()
             tools = []
             for t in raw.tools:
+                # Build a Pydantic model from the MCP tool's input schema
+                # so the LLM sees the exact argument names and types
+                schema = t.inputSchema or {}
+                props  = schema.get("properties", {})
+                fields = {}
+                for field_name, field_info in props.items():
+                    py_type = _type_map.get(field_info.get("type", "string"), str)
+                    fields[field_name] = (py_type, ...)
+
+                args_model = create_model(f"{t.name}Args", **fields)
+
                 lc_tool = StructuredTool.from_function(
                     func=_make_mcp_caller(t.name, server_script),
                     name=t.name,
                     description=t.description or f"MCP tool: {t.name}",
+                    args_schema=args_model,
                 )
                 tools.append(lc_tool)
             return tools, [t.name for t in raw.tools]
@@ -109,12 +127,14 @@ def extract_trace(result: dict) -> list:
     for m in result["messages"]:
         role    = getattr(m, "type", "unknown")
         content = m.content
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    trace.append({"role": "tool_call", "tool": block["name"],
-                                  "args": block.get("input", {})})
-        elif content:
+
+        # Extract tool calls from AIMessage.tool_calls (OpenAI-compatible format)
+        if hasattr(m, "tool_calls") and m.tool_calls:
+            for tc in m.tool_calls:
+                trace.append({"role": "tool_call", "tool": tc["name"],
+                              "args": tc.get("args", {})})
+
+        if content:
             trace.append({"role": role, "content": str(content)})
     return trace
 
@@ -135,7 +155,7 @@ async def main() -> None:
     llm = ChatOpenAI(
         base_url="https://api.tokenfactory.nebius.com/v1/",
         api_key=os.getenv("NEBIUS_KEY"),
-        model="meta-llama/Llama-3.3-70B-Instruct",
+        model="moonshotai/Kimi-K2.5",
         temperature=0,
     )
 
@@ -153,7 +173,7 @@ async def main() -> None:
     print(f"\n{'=' * 65}")
     print("  Query 1 — Search + Detail Fetch")
     print(f"{'=' * 65}\n")
-    r1     = agent.invoke({"messages": [("user", q1)]})
+    r1     = agent.invoke({"messages": [("user", q1)]}, config={"recursion_limit": 20})
     trace1 = extract_trace(r1)
     print_trace(trace1)
     output["queries"]["query_1"] = {"query": q1, "trace": trace1}
@@ -163,7 +183,7 @@ async def main() -> None:
     print(f"\n{'=' * 65}")
     print("  Query 2 — Impossible Constraint")
     print(f"{'=' * 65}\n")
-    r2     = agent.invoke({"messages": [("user", q2)]})
+    r2     = agent.invoke({"messages": [("user", q2)]}, config={"recursion_limit": 20})
     trace2 = extract_trace(r2)
     print_trace(trace2)
     output["queries"]["query_2"] = {"query": q2, "trace": trace2}

@@ -43,11 +43,11 @@ without modifying the agent code.
 # naming a component and explaining why that component does that job.
 
 WEEK_5_ARCHITECTURE = """
-- FILL ME IN
-- FILL ME IN
-- FILL ME IN
-- FILL ME IN
-- FILL ME IN
+- Shared MCP server for easiliy extendable tools support.
+- Web search and file system access for getting the actual data.
+- Planner / Executor split for effecient reasoning and execution.
+- Memory for having previous searches and learning from previous bookings.
+- Observability for production monitoring and troubleshooting.
 """
 
 # ── The guiding question ───────────────────────────────────────────────────
